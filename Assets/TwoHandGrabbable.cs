@@ -1,0 +1,183 @@
+using UnityEngine;
+
+[RequireComponent(typeof(Rigidbody))]
+public class TwoHandGrabbable : MonoBehaviour
+{
+    public bool allowTwoHand = true;
+
+    [Header("Extra Credit")]
+    public bool doubleRotation = false;
+
+    Rigidbody rb;
+
+    Transform handA;
+    Transform handB;
+
+    // one-hand tracking
+    Vector3 prevPosA;
+    Quaternion prevRotA;
+
+    // two-hand tracking
+    Vector3 prevPosB;
+    Quaternion prevRotB;
+
+    // to keep object offset around midpoint in 2-hand mode
+    Vector3 twoHandLocalOffset;
+
+    bool wasKinematic;
+    bool wasUseGravity;
+
+    void Awake() => rb = GetComponent<Rigidbody>();
+
+    public bool Grab(Transform hand)
+    {
+        if (handA == null)
+        {
+            handA = hand;
+            prevPosA = handA.position;
+            prevRotA = handA.rotation;
+            BeginHoldPhysics();
+            return true;
+        }
+
+        if (!allowTwoHand || handB != null || hand == handA) return false;
+
+        handB = hand;
+        prevPosB = handB.position;
+        prevRotB = handB.rotation;
+
+        // store offset relative to midpoint so object doesn't snap
+        Vector3 mid = (handA.position + handB.position) * 0.5f;
+        twoHandLocalOffset = rb.position - mid;
+
+        return true;
+    }
+
+    public void Release(Transform hand)
+    {
+        if (hand == handB)
+        {
+            handB = null;
+            // reset one-hand tracking
+            prevPosA = handA.position;
+            prevRotA = handA.rotation;
+            return;
+        }
+
+        if (hand == handA)
+        {
+            if (handB != null)
+            {
+                // promote B to A
+                handA = handB;
+                prevPosA = prevPosB;
+                prevRotA = prevRotB;
+                handB = null;
+                return;
+            }
+
+            handA = null;
+            handB = null;
+            EndHoldPhysics();
+        }
+    }
+
+    void FixedUpdate()
+    {
+        if (handA == null) return;
+
+        if (handB == null)
+        {
+            OneHandUpdate();
+        }
+        else
+        {
+            TwoHandUpdate();
+        }
+    }
+
+    void OneHandUpdate()
+    {
+        Vector3 dp = handA.position - prevPosA;
+        Quaternion dq = handA.rotation * Quaternion.Inverse(prevRotA);
+
+        if (doubleRotation) dq = DoubleQuaternion(dq);
+
+        // rotate around controller (moon-earth)
+        Vector3 newPos = rb.position + dp;
+        newPos = RotateAround(newPos, handA.position, dq);
+
+        Quaternion newRot = dq * rb.rotation;
+
+        rb.MovePosition(newPos);
+        rb.MoveRotation(newRot);
+
+        prevPosA = handA.position;
+        prevRotA = handA.rotation;
+    }
+
+    void TwoHandUpdate()
+    {
+        Vector3 midPrev = (prevPosA + prevPosB) * 0.5f;
+        Vector3 midNow  = (handA.position + handB.position) * 0.5f;
+
+        // translation = حرکت midpoint  (این باعث میشه وقتی دست‌ها خلاف هم میرن، جسم عقب/جلو نره)
+        Vector3 dpMid = midNow - midPrev;
+
+        // rotation = تغییر جهت بردار بین دو دست (این همون چیزیه که تو میخوای: یکی بالا یکی پایین => میچرخه)
+        Vector3 vPrev = (prevPosB - prevPosA);
+        Vector3 vNow  = (handB.position - handA.position);
+
+        Quaternion dqHands = Quaternion.identity;
+        if (vPrev.sqrMagnitude > 1e-6f && vNow.sqrMagnitude > 1e-6f)
+            dqHands = Quaternion.FromToRotation(vPrev, vNow);
+
+        if (doubleRotation) dqHands = DoubleQuaternion(dqHands);
+
+        // موقعیت: offset قبلی را حول midpoint بچرخان
+        twoHandLocalOffset = dqHands * twoHandLocalOffset;
+
+        Vector3 targetPos = midNow + twoHandLocalOffset + dpMid; // dpMid عملاً midNow را پوشش می‌دهد، اما امن است
+        Quaternion targetRot = dqHands * rb.rotation;
+
+        rb.MovePosition(targetPos);
+        rb.MoveRotation(targetRot);
+
+        // update prevs
+        prevPosA = handA.position;
+        prevPosB = handB.position;
+
+        // اگر خواستی هنوز از چرخش کنترلرها هم اثر بگیری، می‌تونیم اضافه کنیم؛ فعلاً این “آزادترین” حسه.
+        prevRotA = handA.rotation;
+        prevRotB = handB.rotation;
+    }
+
+    Vector3 RotateAround(Vector3 p, Vector3 pivot, Quaternion dq)
+    {
+        Vector3 r = p - pivot;
+        r = dq * r;
+        return pivot + r;
+    }
+
+    Quaternion DoubleQuaternion(Quaternion q)
+    {
+        q.ToAngleAxis(out float angle, out Vector3 axis);
+        if (axis.sqrMagnitude < 1e-6f) return q;
+        return Quaternion.AngleAxis(angle * 2f, axis.normalized);
+    }
+
+    void BeginHoldPhysics()
+    {
+        wasKinematic = rb.isKinematic;
+        wasUseGravity = rb.useGravity;
+        rb.useGravity = false;
+        rb.isKinematic = true;
+        rb.interpolation = RigidbodyInterpolation.Interpolate;
+    }
+
+    void EndHoldPhysics()
+    {
+        rb.isKinematic = wasKinematic;
+        rb.useGravity = wasUseGravity;
+    }
+}
