@@ -7,28 +7,27 @@ using UnityEngine.InputSystem;
 public class CustomGrab : MonoBehaviour
 {
     [Header("Input (Button Action)")]
-    public InputActionReference action; // مثلا XRI Left/Right Interaction / UI Press
+    public InputActionReference action;
 
     [Header("Filtering")]
-    public bool requireGrabbableTag = true;   // اگر ذره‌بین Tag درست ندارد، این را false کن
+    public bool requireGrabbableTag = true; 
     public string grabbableTag = "grabbable";
 
     [Header("Debug")]
     public bool debugLogs = false;
 
-    // چیزهایی که داخل محدوده دست هستند (کامپوننت اصلی، نه Transform خام)
     private readonly List<TwoHandGrabbable> near = new();
 
-    // چیزی که این دست نگه داشته
+    
     private TwoHandGrabbable held;
 
     void Awake()
     {
-        // Trigger لازم است
+      
         var col = GetComponent<Collider>();
         col.isTrigger = true;
 
-        // Rigidbody کینماتیک برای پایدار بودن trigger
+       
         var rb = GetComponent<Rigidbody>();
         rb.useGravity = false;
         rb.isKinematic = true;
@@ -62,7 +61,7 @@ public class CustomGrab : MonoBehaviour
         var target = GetClosest();
         if (target == null) return;
 
-        // از خود Grabbable درخواست grab می‌کنیم
+       
         if (target.Grab(transform))
         {
             held = target;
@@ -97,10 +96,10 @@ public class CustomGrab : MonoBehaviour
 
     void OnTriggerEnter(Collider other)
     {
-        // اگر می‌خوای فقط با Tag کار کنه:
+      
         if (requireGrabbableTag && !other.CompareTag(grabbableTag)) return;
 
-        // مهم: اگر Collider روی child باشد، از parent می‌گیریم
+      
         var g = other.GetComponentInParent<TwoHandGrabbable>();
         if (g == null) return;
 
