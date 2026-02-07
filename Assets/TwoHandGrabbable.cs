@@ -3,50 +3,50 @@ using UnityEngine;
 [RequireComponent(typeof(Rigidbody))]
 public class TwoHandGrabbable : MonoBehaviour
 {
+    [Header("Settings")]
     public bool allowTwoHand = true;
+    public bool doubleRotation = false; // Extra Credit
 
-    [Header("Extra Credit")]
-    public bool doubleRotation = false;
+    private Rigidbody rb;
 
-    Rigidbody rb;
+    // Hands
+    private Transform handA;
+    private Transform handB;
 
-    Transform handA;
-    Transform handB;
+    // History
+    private Vector3 prevPosA;
+    private Quaternion prevRotA;
+    private Vector3 prevPosB;
+    private Quaternion prevRotB;
 
-    Vector3 prevPosA;
-    Quaternion prevRotA;
-
-    Vector3 prevPosB;
-    Quaternion prevRotB;
-
-    Vector3 twoHandLocalOffset;
-
-    bool wasKinematic;
-    bool wasUseGravity;
+    // Physics Backup
+    private bool wasKinematic;
+    private bool wasUseGravity;
 
     void Awake() => rb = GetComponent<Rigidbody>();
 
     public bool Grab(Transform hand)
     {
+        // 1. First Hand
         if (handA == null)
         {
             handA = hand;
-            prevPosA = handA.position;
-            prevRotA = handA.rotation;
+            prevPosA = hand.position;
+            prevRotA = hand.rotation;
             BeginHoldPhysics();
             return true;
         }
 
-        if (!allowTwoHand || handB != null || hand == handA) return false;
+        // 2. Second Hand
+        if (allowTwoHand && handB == null && hand != handA)
+        {
+            handB = hand;
+            prevPosB = hand.position;
+            prevRotB = hand.rotation;
+            return true;
+        }
 
-        handB = hand;
-        prevPosB = handB.position;
-        prevRotB = handB.rotation;
-
-        Vector3 mid = (handA.position + handB.position) * 0.5f;
-        twoHandLocalOffset = rb.position - mid;
-
-        return true;
+        return false;
     }
 
     public void Release(Transform hand)
@@ -54,8 +54,6 @@ public class TwoHandGrabbable : MonoBehaviour
         if (hand == handB)
         {
             handB = null;
-            prevPosA = handA.position;
-            prevRotA = handA.rotation;
             return;
         }
 
@@ -67,12 +65,12 @@ public class TwoHandGrabbable : MonoBehaviour
                 prevPosA = prevPosB;
                 prevRotA = prevRotB;
                 handB = null;
-                return;
             }
-
-            handA = null;
-            handB = null;
-            EndHoldPhysics();
+            else
+            {
+                handA = null;
+                EndHoldPhysics();
+            }
         }
     }
 
@@ -80,85 +78,82 @@ public class TwoHandGrabbable : MonoBehaviour
     {
         if (handA == null) return;
 
+        Vector3 posChange = Vector3.zero;
+        Quaternion rotChange = Quaternion.identity;
+
+        // --- ONE HAND MODE ---
         if (handB == null)
         {
-            OneHandUpdate();
+            GetHandDelta(handA, ref prevPosA, ref prevRotA, out Vector3 dPos, out Quaternion dRot);
+            posChange = dPos;
+            rotChange = dRot;
         }
+        // --- TWO HAND MODE ---
         else
         {
-            TwoHandUpdate();
+            // 1. Calculate STEERING (Handlebar) Rotation FIRST
+            // We must do this BEFORE GetHandDelta updates the 'prevPos' variables.
+            Vector3 prevDir = prevPosB - prevPosA;
+            Vector3 currDir = handB.position - handA.position;
+            
+            Quaternion steerRot = Quaternion.identity;
+            if (prevDir.sqrMagnitude > 0.001f && currDir.sqrMagnitude > 0.001f)
+            {
+                steerRot = Quaternion.FromToRotation(prevDir.normalized, currDir.normalized);
+            }
+
+            // 2. Calculate Individual Hand Movements (Wrists & Position)
+            GetHandDelta(handA, ref prevPosA, ref prevRotA, out Vector3 dPosA, out Quaternion dRotA);
+            GetHandDelta(handB, ref prevPosB, ref prevRotB, out Vector3 dPosB, out Quaternion dRotB);
+
+            // 3. Combine Everything
+            
+            // Average the Position (Fixes the "Go Further" bug)
+            posChange = (dPosA + dPosB) * 0.5f;
+
+            // Combine Rotation: Steering * WristA * WristB
+            rotChange = steerRot * (dRotA * dRotB);
         }
+
+        // --- EXTRA CREDIT: DOUBLE ROTATION ---
+        if (doubleRotation)
+        {
+            rotChange.ToAngleAxis(out float angle, out Vector3 axis);
+            // Safety check to prevent NaN errors
+            if (!float.IsInfinity(axis.x) && axis.sqrMagnitude > 0.001f)
+                rotChange = Quaternion.AngleAxis(angle * 2.0f, axis);
+        }
+
+        // --- APPLY PHYSICS ---
+        rb.MovePosition(rb.position + posChange);
+        rb.MoveRotation(rotChange * rb.rotation);
     }
 
-    void OneHandUpdate()
+    // Helper: Calculates Wrist Rotation and "Pivot" Arc Movement
+    void GetHandDelta(Transform hand, ref Vector3 prevPos, ref Quaternion prevRot, out Vector3 dPos, out Quaternion dRot)
     {
-        Vector3 dp = handA.position - prevPosA;
-        Quaternion dq = handA.rotation * Quaternion.Inverse(prevRotA);
+        // Basic movement
+        dPos = hand.position - prevPos;
+        dRot = hand.rotation * Quaternion.Inverse(prevRot);
 
-        if (doubleRotation) dq = DoubleQuaternion(dq);
+        // Pivot Logic: Object orbits the hand (like Moon around Earth)
+        Vector3 relative = rb.position - hand.position;
+        Vector3 rotatedRelative = dRot * relative;
+        Vector3 pivotMove = rotatedRelative - relative;
 
-        Vector3 newPos = rb.position + dp;
-        newPos = RotateAround(newPos, handA.position, dq);
+        dPos += pivotMove;
 
-        Quaternion newRot = dq * rb.rotation;
-
-        rb.MovePosition(newPos);
-        rb.MoveRotation(newRot);
-
-        prevPosA = handA.position;
-        prevRotA = handA.rotation;
-    }
-
-    void TwoHandUpdate()
-    {
-        Vector3 midPrev = (prevPosA + prevPosB) * 0.5f;
-        Vector3 midNow  = (handA.position + handB.position) * 0.5f;
-
-        Vector3 dpMid = midNow - midPrev;
-
-        Vector3 vPrev = (prevPosB - prevPosA);
-        Vector3 vNow  = (handB.position - handA.position);
-
-        Quaternion dqHands = Quaternion.identity;
-        if (vPrev.sqrMagnitude > 1e-6f && vNow.sqrMagnitude > 1e-6f)
-            dqHands = Quaternion.FromToRotation(vPrev, vNow);
-
-        if (doubleRotation) dqHands = DoubleQuaternion(dqHands);
-        twoHandLocalOffset = dqHands * twoHandLocalOffset;
-
-        Vector3 targetPos = midNow + twoHandLocalOffset + dpMid; 
-        Quaternion targetRot = dqHands * rb.rotation;
-
-        rb.MovePosition(targetPos);
-        rb.MoveRotation(targetRot);
-
-        prevPosA = handA.position;
-        prevPosB = handB.position;
-
-        prevRotA = handA.rotation;
-        prevRotB = handB.rotation;
-    }
-
-    Vector3 RotateAround(Vector3 p, Vector3 pivot, Quaternion dq)
-    {
-        Vector3 r = p - pivot;
-        r = dq * r;
-        return pivot + r;
-    }
-
-    Quaternion DoubleQuaternion(Quaternion q)
-    {
-        q.ToAngleAxis(out float angle, out Vector3 axis);
-        if (axis.sqrMagnitude < 1e-6f) return q;
-        return Quaternion.AngleAxis(angle * 2f, axis.normalized);
+        // Update history
+        prevPos = hand.position;
+        prevRot = hand.rotation;
     }
 
     void BeginHoldPhysics()
     {
         wasKinematic = rb.isKinematic;
         wasUseGravity = rb.useGravity;
-        rb.useGravity = false;
         rb.isKinematic = true;
+        rb.useGravity = false;
         rb.interpolation = RigidbodyInterpolation.Interpolate;
     }
 

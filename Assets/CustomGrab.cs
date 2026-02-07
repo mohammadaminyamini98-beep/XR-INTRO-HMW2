@@ -6,118 +6,116 @@ using UnityEngine.InputSystem;
 [RequireComponent(typeof(Rigidbody))]
 public class CustomGrab : MonoBehaviour
 {
-    [Header("Input (Button Action)")]
-    public InputActionReference action;
+    [Header("Input")]
+    public InputActionReference action; // Assign XRI Left/Right Interaction/Select here
 
-    [Header("Filtering")]
-    public bool requireGrabbableTag = true; 
+    [Header("Settings")]
     public string grabbableTag = "grabbable";
 
-    [Header("Debug")]
-    public bool debugLogs = false;
-
-    private readonly List<TwoHandGrabbable> near = new();
-
+    // Track objects currently inside the trigger
+    private List<TwoHandGrabbable> nearObjects = new List<TwoHandGrabbable>();
     
-    private TwoHandGrabbable held;
+    // Track what we are currently holding
+    private TwoHandGrabbable currentHeldObject;
 
     void Awake()
     {
-      
-        var col = GetComponent<Collider>();
-        col.isTrigger = true;
-
-       
-        var rb = GetComponent<Rigidbody>();
-        rb.useGravity = false;
-        rb.isKinematic = true;
+        // Ensure required components are set up correctly
+        GetComponent<Collider>().isTrigger = true;
+        GetComponent<Rigidbody>().isKinematic = true;
     }
 
-    void OnEnable()
-    {
-        if (action != null) action.action.Enable();
-    }
-
-    void OnDisable()
-    {
-        if (action != null) action.action.Disable();
-    }
+    void OnEnable() => action.action.Enable();
+    void OnDisable() => action.action.Disable();
 
     void Update()
     {
-        if (action == null) return;
-
+        // 1. Detect Grab Press
         if (action.action.WasPressedThisFrame())
+        {
             TryGrab();
+        }
 
+        // 2. Detect Release
         if (action.action.WasReleasedThisFrame())
+        {
             Release();
+        }
     }
 
     void TryGrab()
     {
-        if (held != null) return;
+        // Don't grab if already holding something
+        if (currentHeldObject != null) return;
 
-        var target = GetClosest();
-        if (target == null) return;
-
-       
-        if (target.Grab(transform))
+        // Find the closest valid object
+        TwoHandGrabbable target = GetClosest();
+        if (target != null)
         {
-            held = target;
-            if (debugLogs) Debug.Log($"[{name}] GRAB -> {target.name}");
+            // Try to grab it. If successful, save it.
+            if (target.Grab(transform))
+            {
+                currentHeldObject = target;
+            }
         }
     }
 
     void Release()
     {
-        if (held == null) return;
-
-        held.Release(transform);
-        if (debugLogs) Debug.Log($"[{name}] RELEASE");
-
-        held = null;
+        if (currentHeldObject != null)
+        {
+            currentHeldObject.Release(transform);
+            currentHeldObject = null;
+        }
     }
 
+    // Helper to find closest object in the trigger list
     TwoHandGrabbable GetClosest()
     {
-        TwoHandGrabbable best = null;
-        float bestD = float.MaxValue;
+        TwoHandGrabbable closest = null;
+        float minDistance = float.MaxValue;
 
-        for (int i = near.Count - 1; i >= 0; i--)
+        // Iterate backwards to safely remove nulls if objects were destroyed
+        for (int i = nearObjects.Count - 1; i >= 0; i--)
         {
-            if (near[i] == null) { near.RemoveAt(i); continue; }
+            if (nearObjects[i] == null)
+            {
+                nearObjects.RemoveAt(i);
+                continue;
+            }
 
-            float d = (near[i].transform.position - transform.position).sqrMagnitude;
-            if (d < bestD) { bestD = d; best = near[i]; }
+            float dist = Vector3.Distance(transform.position, nearObjects[i].transform.position);
+            if (dist < minDistance)
+            {
+                minDistance = dist;
+                closest = nearObjects[i];
+            }
         }
-        return best;
+        return closest;
     }
 
+    // Trigger Logic to build the list of nearby objects
     void OnTriggerEnter(Collider other)
     {
-      
-        if (requireGrabbableTag && !other.CompareTag(grabbableTag)) return;
-
-      
-        var g = other.GetComponentInParent<TwoHandGrabbable>();
-        if (g == null) return;
-
-        if (!near.Contains(g))
+        if (other.CompareTag(grabbableTag))
         {
-            near.Add(g);
-            if (debugLogs) Debug.Log($"[{name}] ENTER -> {other.name} (grabbable={g.name}) near={near.Count}");
+            var script = other.GetComponentInParent<TwoHandGrabbable>();
+            if (script != null && !nearObjects.Contains(script))
+            {
+                nearObjects.Add(script);
+            }
         }
     }
 
     void OnTriggerExit(Collider other)
     {
-        if (requireGrabbableTag && !other.CompareTag(grabbableTag)) return;
-
-        var g = other.GetComponentInParent<TwoHandGrabbable>();
-        if (g == null) return;
-
-        if (near.Remove(g) && debugLogs)
-            Debug.Log($"[{name}] EXIT -> {other.name} (grabbable={g.name}) near={near.Count}");
+        if (other.CompareTag(grabbableTag))
+        {
+            var script = other.GetComponentInParent<TwoHandGrabbable>();
+            if (script != null)
+            {
+                nearObjects.Remove(script);
+            }
+        }
     }
 }
