@@ -529,7 +529,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::LensFollowView_DEBUG
   lensCenter: {fileID: 195420359}
   headCamera: {fileID: 1462751883}
-  zoomFov: 20
+  zoomFov: 15
 --- !u!1 &195420358
 GameObject:
   m_ObjectHideFlags: 0

@@ -4,41 +4,42 @@ using UnityEngine;
 public class LensFollowView : MonoBehaviour
 {
     [Header("References")]
-    public Transform lensCenter;   // Empty at lens center
-    public Transform headCamera;   // XR Main Camera
+    public Transform lensCenter;   // The physical Glass object
+    public Transform headCamera;   // Your VR Headset Camera (Main Camera)
 
-    [Header("Zoom")]
-    [Range(5f, 120f)]
-    public float zoomFov = 20f;
+    [Header("Zoom Settings")]
+    [Range(5f, 60f)]
+    public float zoomFov = 15f;    // Lower number = Higher Magnification
 
-    Camera _cam;
+    private Camera _lensCam;
 
     void Awake()
     {
-        _cam = GetComponent<Camera>();
+        _lensCam = GetComponent<Camera>();
     }
 
-    void Start()
+    void LateUpdate()
     {
-        if (!headCamera && Camera.main) headCamera = Camera.main.transform;
-    }
+        if (lensCenter == null || headCamera == null) return;
 
-void LateUpdate()
-    {
-        if (!lensCenter || !headCamera) return;
-
-        // 1) Position: Stick to the lens center
+        // 1. POSITION: Stick the camera to the center of the glass
         transform.position = lensCenter.position;
 
-        // 2) Rotation: Look FROM the player's head THROUGH the lens
-        // Calculate the vector from Head -> Lens
+        // 2. ROTATION: The "Window" Effect
+        // Calculate the direction from your Eye -> The Glass
         Vector3 directionToLens = transform.position - headCamera.position;
 
-        // Rotate the camera to look along that vector
-        // We use 'headCamera.up' to make sure the camera rolls when your head tilts
-        transform.rotation = Quaternion.LookRotation(directionToLens, headCamera.up);
+        // Force the camera to look along that direction.
+        // using 'headCamera.up' keeps it stable so it doesn't spin wildly.
+        if (directionToLens != Vector3.zero)
+        {
+            transform.rotation = Quaternion.LookRotation(directionToLens, headCamera.up);
+        }
 
-        if (_cam && !_cam.orthographic)
-            _cam.fieldOfView = zoomFov;
+        // 3. ZOOM: Ensure the zoom stays locked
+        if (_lensCam != null)
+        {
+            _lensCam.fieldOfView = zoomFov;
+        }
     }
 }
